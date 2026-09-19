@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createRun, evaluateRun, findPendingApproval, getRun, listRuns, subscribeToTrace } from "@/lib/api";
+import { createRun, getRuntime, getTrace, evaluateRun, findPendingApproval, getRun, listRuns, subscribeToTrace } from "@/lib/api";
 import { isTerminalStatus, type EvaluationResult, type RunDetail, type RunListItem, type TraceEvent } from "@/lib/types";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { EvaluationPanel } from "@/components/EvaluationPanel";
@@ -14,6 +14,7 @@ import { TaskInput } from "@/components/TaskInput";
 import { TracePanel } from "@/components/TracePanel";
 
 export default function Home() {
+  const [runtime, setRuntime] = useState<{ provider: string; agent_name: string | null; trueforge_url: string | null } | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [run, setRun] = useState<RunDetail | null>(null);
   const [trace, setTrace] = useState<TraceEvent[]>([]);
@@ -31,6 +32,7 @@ export default function Home() {
 
   useEffect(() => {
     refreshHistory();
+    getRuntime().then(setRuntime).catch(() => {});
   }, [refreshHistory]);
 
   // Poll run detail every second while active, and keep the trace stream
@@ -50,6 +52,10 @@ export default function Home() {
         const detail = await getRun(id);
         if (cancelled) return;
         setRun(detail);
+        if (detail.provider === "trueforge" || isTerminalStatus(detail.status)) {
+          const persisted = await getTrace(id);
+          if (!cancelled) setTrace(persisted);
+        }
         if (isTerminalStatus(detail.status)) {
           stopTrace();
           refreshHistory();
@@ -71,7 +77,7 @@ export default function Home() {
 
   // Evaluate once, the first time a run is observed in a terminal status.
   useEffect(() => {
-    if (!run || !isTerminalStatus(run.status)) return;
+    if (!run || run.provider === "trueforge" || !isTerminalStatus(run.status)) return;
     if (evaluatedRunId.current === run.id) return;
     evaluatedRunId.current = run.id;
     setEvaluation(undefined);
@@ -80,11 +86,11 @@ export default function Home() {
       .catch(() => setEvaluation(null));
   }, [run]);
 
-  async function handleSubmit(task: string) {
+  async function handleSubmit(task: string, forceModelFailure = false) {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const created = await createRun(task);
+      const created = await createRun(task, forceModelFailure);
       evaluatedRunId.current = null;
       setEvaluation(undefined);
       setTrace([]);
@@ -123,13 +129,25 @@ export default function Home() {
     <div className="shell">
       <RunHeader />
 
-      <TaskInput onSubmit={handleSubmit} disabled={submitting} />
+      <section className="panel">
+        <p>Runtime: {runtime?.provider === "trueforge" ? `TrueForge · ${runtime.agent_name}` : runtime ? "Offline harness demo" : "Connecting…"}</p>
+        {runtime?.trueforge_url && <a href={runtime.trueforge_url} target="_blank" rel="noreferrer">Open TrueForge sessions and settings</a>}
+        {run?.trueforge_session_id && <p>Session: {run.trueforge_session_id}</p>}
+        {run?.status === "WAITING_FOR_INPUT" && <p>Continue this session in TrueForge to answer questions or connect a tool.</p>}
+        {run?.sync_error && <p className="form-error">{run.sync_error}</p>}
+      </section>
+      <TaskInput onSubmit={handleSubmit} disabled={submitting || !runtime} trueforge={runtime?.provider === "trueforge"} />
       {submitError && <p className="form-error">{submitError}</p>}
 
-      {run && pendingApproval && runId && (
-        <ApprovalCard runId={runId} event={pendingApproval} />
+      {run && run.provider !== "trueforge" && pendingApproval && runId && (
+        <ApprovalCard key={pendingApproval.id} runId={runId} event={pendingApproval} />
       )}
 
+      {run?.provider === "trueforge" && run.status === "WAITING_FOR_APPROVAL" && run.pending_approvals?.map((approval) => (
+        <ApprovalCard key={approval.id} runId={run.id} event={{ id: approval.id, run_id: run.id,
+          type: "APPROVAL_REQUIRED", name: approval.name, status: "pending", timestamp: "", latency_ms: null,
+          metadata: { approval_id: approval.id, args: approval.args } }} />
+      ))}
       <div className="main-grid">
         <div className="main-grid-left">
           <section className="panel">
@@ -138,7 +156,7 @@ export default function Home() {
           </section>
           <MetricsPanel run={run} />
           <ResultPanel run={run} />
-          {run && isTerminalStatus(run.status) && <EvaluationPanel evaluation={evaluation} />}
+          {run && run.provider !== "trueforge" && isTerminalStatus(run.status) && <EvaluationPanel evaluation={evaluation} />}
           <RunHistory runs={history} activeRunId={runId} onSelect={handleSelectRun} />
         </div>
         <div className="main-grid-right">

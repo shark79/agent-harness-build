@@ -1,3 +1,5 @@
+> **Scope:** This document describes the original offline custom-harness demo. For the implemented TrueForge integration and challenge setup, use [TRUEFORGE_SETUP.md](../TRUEFORGE_SETUP.md). Statements below about an unimplemented TrueForge provider refer to the earlier scaffold.
+
 # Environment Variables
 
 All environment variables are loaded from `.env` at the repository root (shared with both backend and frontend).

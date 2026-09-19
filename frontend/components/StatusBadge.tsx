@@ -4,6 +4,7 @@ const STATUS_MAP: Record<string, { label: string; tone: Tone; pulse?: boolean }>
   CREATED: { label: "Created", tone: "muted" },
   RUNNING: { label: "Running", tone: "blue", pulse: true },
   WAITING_FOR_APPROVAL: { label: "Waiting for approval", tone: "amber", pulse: true },
+  WAITING_FOR_INPUT: { label: "Continue in TrueForge", tone: "amber" },
   RETRYING: { label: "Retrying", tone: "amber", pulse: true },
   COMPLETED: { label: "Completed", tone: "teal" },
   FAILED: { label: "Failed", tone: "red" },

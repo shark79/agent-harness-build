@@ -224,3 +224,5 @@ node_modules/
 frontend/.env.local
 .DS_Store
 *.db
+tools/openai-image-mcp/.venv/
+tools/openai-image-mcp/generated/

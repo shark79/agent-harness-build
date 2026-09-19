@@ -16,9 +16,6 @@ export function ApprovalCard({
 
   const approvalId = String(event.metadata?.approval_id ?? "");
   const args = (event.metadata?.args as Record<string, unknown>) ?? {};
-  const to = typeof args.to === "string" ? args.to : "—";
-  const subject = typeof args.subject === "string" ? args.subject : "—";
-  const preview = typeof args.body === "string" ? args.body : "—";
 
   async function decide(decision: "approve" | "deny") {
     if (!approvalId || pendingDecision) return;
@@ -34,15 +31,8 @@ export function ApprovalCard({
 
   return (
     <div className="approval-banner">
-      <p className="approval-banner-title">Agent wants permission to: SEND EMAIL</p>
-      <dl className="approval-fields">
-        <dt>To</dt>
-        <dd>{to}</dd>
-        <dt>Subject</dt>
-        <dd>{subject}</dd>
-        <dt>Preview</dt>
-        <dd>{preview}</dd>
-      </dl>
+      <p className="approval-banner-title">Agent wants permission to: {event.name ?? "execute a tool"}</p>
+      <pre className="trace-event-meta">{JSON.stringify(args, null, 2)}</pre>
       <div className="approval-actions">
         <button
           className="approve-button"

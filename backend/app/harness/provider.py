@@ -1,11 +1,4 @@
-"""HarnessProvider - the pluggable "backend" for running the harness loop.
-
-LocalHarnessProvider is what's actually used: it wires PermissionEngine +
-ApprovalEngine + ToolRegistry + TraceRecorder into a HarnessOrchestrator
-running in this same process. TrueForgeHarnessProvider is a documented,
-NotImplemented extension point (see its docstring) for a future managed
-harness backend - do not guess at that SDK's API.
-"""
+"""Select the offline demonstration or the official TrueForge runtime."""
 from abc import ABC, abstractmethod
 
 from app.config import settings
@@ -43,41 +36,15 @@ class LocalHarnessProvider(HarnessProvider):
         await self._orchestrator.resolve_approval(run_id, approval_id, decision)
 
 
-class TrueForgeHarnessProvider(HarnessProvider):
-    """Extension point for a future TrueFoundry/"TrueForge" managed harness
-    backend. NOT IMPLEMENTED: no TrueFoundry/TrueForge SDK or package is
-    installed anywhere in this project, and its exact API surface is unknown
-    - this class deliberately does not guess at it.
-
-    To wire up a real integration, implement the same interface as
-    LocalHarnessProvider:
-      - start_run(run_id, task): submit the task to the managed service
-        instead of the in-process HarnessOrchestrator.
-      - resolve_approval(run_id, approval_id, decision): forward the human
-        decision to that service.
-      - Translate whatever callback/webhook/polling mechanism the service
-        uses back into TraceEvent rows via the same TraceRecorder shape
-        LocalHarnessProvider uses, so nothing else in this app (API routes,
-        the SSE stream, GET /api/runs/{id}) needs to change.
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        raise NotImplementedError(
-            "TrueForgeHarnessProvider is a documented extension point only - "
-            "see this class's docstring for what a real integration needs to wire up."
-        )
-
-    async def start_run(self, run_id: str, task: str, force_model_failure: bool = False) -> None:
-        raise NotImplementedError
-
-    async def resolve_approval(self, run_id: str, approval_id: str, decision: str) -> None:
-        raise NotImplementedError
+from app.harness.trueforge import TrueForgeHarnessProvider
 
 
 def get_harness_provider() -> HarnessProvider:
     if settings.harness_provider == "trueforge":
         return TrueForgeHarnessProvider()
-    return LocalHarnessProvider()
+    if settings.harness_provider == "local":
+        return LocalHarnessProvider()
+    raise ValueError("HARNESS_PROVIDER must be local or trueforge")
 
 
 harness_provider = get_harness_provider()

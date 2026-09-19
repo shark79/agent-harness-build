@@ -1,23 +1,9 @@
-# One-Sentence Pitch
+# Agent Control Tower
 
-**Agent Control Tower is an open-source AI agent harness that enforces policies, pauses for human approval, traces every step, recovers from failures automatically, and controls costs—without touching your agent code.**
+An approval-gated research and delivery agent running on TrueForge.
 
----
+Give it a research task and a recipient. It gathers sources using MCP tools, prepares a briefing, and requests permission before delivery. The dashboard shows the actual tool arguments at the pause, then records the remote execution history.
 
-## Extended Pitch (30 seconds)
+TrueForge supplies the runtime, tools, approvals, sessions, and optional sandbox/skills/subagents. Our contribution is the focused job, configuration workflow, persistent dashboard bridge, and review interface.
 
-LLM agents are powerful but risky: they can waste money, break things, and fail silently. Agent Control Tower is a minimal governance layer that sits between your agent and its tools. It gives you:
-
-- **Permission enforcement**: ALLOW / REQUIRE_APPROVAL / DENY per tool
-- **Human-in-the-loop**: Pauses for approval before risky operations
-- **Full tracing**: Every step recorded and streamed in real-time
-- **Automatic recovery**: Retry + fallback on transient failures
-- **Cost control**: Token and budget limits per run
-
-Built for the hackathon with 40 passing tests, a working UI, and real governance—not a demo.
-
----
-
-## Why It Matters
-
-Autonomous agents are coming. Without governance, they're liabilities. With Agent Control Tower, they're assets.
+The demonstration must show real source retrieval and verified delivery. The offline fixture mode is for development, not proof of a completed TrueForge job.

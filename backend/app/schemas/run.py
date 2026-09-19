@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RunCreate(BaseModel):
@@ -24,11 +24,15 @@ class RunDetail(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     tokens: int
-    estimated_cost: float
+    estimated_cost: float | None
     latency_ms: int | None = None
     tool_calls: int
-    retry_count: int
+    retry_count: int | None
     result: str | None = None
+    provider: str = "local"
+    trueforge_session_id: str | None = None
+    pending_approvals: list[dict] = Field(default_factory=list)
+    sync_error: str | None = None
 
 
 class RunListItem(BaseModel):

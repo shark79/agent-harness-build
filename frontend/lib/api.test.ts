@@ -63,3 +63,11 @@ describe("findPendingApproval", () => {
     expect(findPendingApproval(trace)).toBe(secondRequired);
   });
 });
+
+test("preserves a sibling pending approval when another is resolved", () => {
+  const first = event({ type: "APPROVAL_REQUIRED", metadata: { approval_id: "a" } });
+  const second = event({ type: "APPROVAL_REQUIRED", metadata: { approval_id: "b" } });
+  expect(findPendingApproval([first, second,
+    event({ type: "APPROVAL_GRANTED", metadata: { approval_id: "b" } }),
+  ])).toBe(first);
+});

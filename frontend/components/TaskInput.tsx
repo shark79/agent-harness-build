@@ -27,9 +27,11 @@ const DEMOS: { label: string; task: string }[] = [
 export function TaskInput({
   onSubmit,
   disabled,
+  trueforge = false,
 }: {
-  onSubmit: (task: string) => void;
+  onSubmit: (task: string, forceModelFailure?: boolean) => void;
   disabled: boolean;
+  trueforge?: boolean;
 }) {
   const [task, setTask] = useState("");
 
@@ -55,14 +57,14 @@ export function TaskInput({
         </button>
       </div>
       <div className="demo-row">
-        {DEMOS.map((demo) => (
+        {!trueforge && DEMOS.map((demo) => (
           <button
             key={demo.label}
             className="demo-button"
             disabled={disabled}
             onClick={() => {
               setTask(demo.task);
-              submit(demo.task);
+              onSubmit(demo.task, demo.label === "Model Failure");
             }}
           >
             DEMO: {demo.label}
