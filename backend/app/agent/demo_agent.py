@@ -9,6 +9,7 @@ real OPENAI_API_KEY is set and DEMO_MODE is not "true" - see adapter.py's
 get_agent_adapter() factory.
 
 Planning rules (see _build_plan):
+  - task mentions "delete"                    -> delete_record -> done
   - task mentions "email"                     -> web_search -> compose summary -> send_email -> done
   - task is arithmetic / mentions "calculate"  -> calculator -> done
   - task mentions "research" (no "email")      -> web_search -> done
@@ -24,6 +25,14 @@ from typing import Any
 from app.agent.adapter import AgentStep, UsageInfo
 
 _ARITH_TOKEN_RE = re.compile(r"[-+*/().\d\s]+")
+_ID_RE = re.compile(r"\b\d+\b")
+
+
+def _extract_record_id(task: str) -> str:
+    """Best-effort pull of a record id out of a delete task, e.g. "delete
+    the customer record for user 4821" -> "4821"."""
+    m = _ID_RE.search(task)
+    return m.group(0) if m else "unknown"
 
 
 def _looks_like_arithmetic(task: str) -> bool:
@@ -56,9 +65,9 @@ class DemoAgentAdapter:
         return self._next_step()
 
     async def resume(self, run_id: str, tool_result: dict) -> AgentStep:
-        if tool_result.get("error") == "denied":
-            return AgentStep(kind="done", result_text=self._final_text(email_denied=True))
         last_action = self._plan[self._index - 1]
+        if tool_result.get("error") == "denied":
+            return AgentStep(kind="done", result_text=self._final_text(denied_tool=last_action))
         if last_action == "web_search":
             self._search_result = tool_result
         elif last_action == "calculator":
@@ -72,6 +81,8 @@ class DemoAgentAdapter:
 
     def _build_plan(self, task: str) -> list[str]:
         lowered = task.lower()
+        if "delete" in lowered:
+            return ["delete_record"]
         if "email" in lowered:
             return ["web_search", "send_email"]
         if "calculate" in lowered or _looks_like_arithmetic(task):
@@ -101,6 +112,10 @@ class DemoAgentAdapter:
                     "body": self._compose_summary(),
                 },
             )
+        if action == "delete_record":
+            return AgentStep(
+                kind="tool_call", tool_name="delete_record", tool_args={"record_id": _extract_record_id(self._task)}
+            )
         raise ValueError(f"unknown planned action: {action}")  # pragma: no cover - defensive
 
     def _compose_summary(self) -> str:
@@ -109,9 +124,11 @@ class DemoAgentAdapter:
         bullets = "\n".join(f"- {r['title']}: {r['snippet']}" for r in self._search_result["results"])
         return f"Executive summary for '{self._task}':\n{bullets}"
 
-    def _final_text(self, email_denied: bool = False) -> str:
-        if email_denied:
+    def _final_text(self, denied_tool: str | None = None) -> str:
+        if denied_tool == "send_email":
             return self._compose_summary() + "\n\n(Email delivery was denied by policy; report delivered here instead, not sent.)"
+        if denied_tool == "delete_record":
+            return f"Could not delete the requested record: denied by policy. No changes were made for: {self._task}"
         if "send_email" in self._plan:
             return f"{self._compose_summary()}\n\nEmail sent."
         if "calculator" in self._plan and self._calc_result:

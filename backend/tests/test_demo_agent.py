@@ -46,6 +46,26 @@ async def test_research_only_task_plans_single_search_then_done():
     assert step2.kind == "done"
 
 
+async def test_delete_task_plans_delete_record():
+    adapter = DemoAgentAdapter()
+    step1 = await adapter.run("Delete the customer record for user 4821", {})
+    assert step1.kind == "tool_call"
+    assert step1.tool_name == "delete_record"
+    assert step1.tool_args["record_id"] == "4821"
+
+
+async def test_denied_delete_record_finishes_gracefully_without_retrying():
+    adapter = DemoAgentAdapter()
+    step1 = await adapter.run("Delete the customer record for user 4821", {})
+    assert step1.kind == "tool_call"
+    assert step1.tool_name == "delete_record"
+
+    step2 = await adapter.resume("run-4", {"error": "denied", "tool": "delete_record"})
+    assert step2.kind == "done"
+    assert "delete" in step2.result_text.lower()
+    assert "denied" in step2.result_text.lower()
+
+
 async def test_generic_task_produces_canned_completion_with_no_tools():
     adapter = DemoAgentAdapter()
     step = await adapter.run("say hello", {})

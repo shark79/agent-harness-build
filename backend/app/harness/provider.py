@@ -20,7 +20,7 @@ from app.tools.registry import tool_registry
 
 class HarnessProvider(ABC):
     @abstractmethod
-    async def start_run(self, run_id: str, task: str) -> None: ...
+    async def start_run(self, run_id: str, task: str, force_model_failure: bool = False) -> None: ...
 
     @abstractmethod
     async def resolve_approval(self, run_id: str, approval_id: str, decision: str) -> None: ...
@@ -36,8 +36,8 @@ class LocalHarnessProvider(HarnessProvider):
             trace_recorder=TraceRecorder(session_factory, event_bus),
         )
 
-    async def start_run(self, run_id: str, task: str) -> None:
-        await self._orchestrator.start_run(run_id, task)
+    async def start_run(self, run_id: str, task: str, force_model_failure: bool = False) -> None:
+        await self._orchestrator.start_run(run_id, task, force_model_failure=force_model_failure)
 
     async def resolve_approval(self, run_id: str, approval_id: str, decision: str) -> None:
         await self._orchestrator.resolve_approval(run_id, approval_id, decision)
@@ -67,7 +67,7 @@ class TrueForgeHarnessProvider(HarnessProvider):
             "see this class's docstring for what a real integration needs to wire up."
         )
 
-    async def start_run(self, run_id: str, task: str) -> None:
+    async def start_run(self, run_id: str, task: str, force_model_failure: bool = False) -> None:
         raise NotImplementedError
 
     async def resolve_approval(self, run_id: str, approval_id: str, decision: str) -> None:

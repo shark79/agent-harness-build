@@ -2,28 +2,32 @@
 -> (ApprovalEngine if needed, which may pause the loop) -> ToolRegistry ->
 execute -> TraceRecorder -> result -> Agent -> ... -> done.
 
-Extension points left deliberately open for the next dispatch:
-  - retry: wrap the `await self._tools.execute(...)` call in _execute_and_continue
-    with retry.py's (currently no-op) wrapper, incrementing Run.retry_count and
-    transitioning through RunStatus.RETRYING on failure.
-  - budget: check budget.py before each `_call_model` (or after, using the
-    accumulated Run.tokens/estimated_cost this dispatch already maintains) and
-    transition to RunStatus.BUDGET_EXCEEDED instead of continuing the loop.
-  - routing: `_call_model` is the single seam where a model call happens: on
-    failure, routing.py's model choice can swap PRIMARY_MODEL for
-    FALLBACK_MODEL there without changing the surrounding loop.
-  - evaluator: after `_complete_run`, evaluator.py can be invoked with run_id
-    to emit EVALUATION_STARTED/EVALUATION_COMPLETED trace events and persist
-    Evaluation rows - the trace event types already exist for this.
-Nothing above is implemented yet; this dispatch only leaves the seams.
+Retry/routing/budget are all wired through the single `_call_model` seam:
+  - retry: each model call attempt goes through retry.with_retry, which
+    retries RetryableModelError up to MAX_ATTEMPTS times (recording
+    RETRY_STARTED + Run.retry_count between attempts) and lets
+    NonRetryableModelError through immediately to fail the run.
+  - routing: on RetryExhausted, the run's ModelRouter switches from
+    PRIMARY_MODEL to FALLBACK_MODEL (recording FALLBACK_TRIGGERED) and the
+    call is retried once more on the fallback model.
+  - budget: usage/cost are added to the Run row after every model call and
+    checked against MAX_RUN_TOKENS/MAX_RUN_COST, recording BUDGET_WARNING at
+    ~80% and stopping the run gracefully (RunStatus.BUDGET_EXCEEDED) at 100%.
+Evaluation (evaluator.py) is invoked on demand via POST /api/runs/{id}/evaluate,
+not automatically from here - see app/api/runs.py.
 """
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.agent.adapter import AgentAdapter, AgentStep, get_agent_adapter
+from app.config import settings
+from app.harness import budget
 from app.harness.approvals import ApprovalEngine
+from app.harness.budget import BudgetExceededError, BudgetStatus
 from app.harness.permissions import PermissionEngine
+from app.harness.retry import RetryExhausted, with_retry
+from app.harness.routing import ModelRouter
 from app.harness.tracing import TraceRecorder
 from app.models.run import Run, RunStatus
 from app.models.trace_event import TraceEventType
@@ -42,7 +46,9 @@ def _aware(dt: datetime) -> datetime:
 @dataclass
 class _ActiveRun:
     adapter: AgentAdapter
+    router: ModelRouter
     pending_step: AgentStep | None = None
+    budget_warned: bool = False
 
 
 class HarnessOrchestrator:
@@ -66,19 +72,22 @@ class HarnessOrchestrator:
         # for the same tradeoff on the SSE side.
         self._active: dict[str, _ActiveRun] = {}
 
-    async def start_run(self, run_id: str, task: str) -> None:
+    async def start_run(self, run_id: str, task: str, force_model_failure: bool = False) -> None:
         adapter = self._agent_factory()
-        self._active[run_id] = _ActiveRun(adapter=adapter)
+        router = ModelRouter(force_failure=force_model_failure or settings.demo_force_model_failure)
+        self._active[run_id] = _ActiveRun(adapter=adapter, router=router)
         await self._update_run(
             run_id,
             status=RunStatus.RUNNING.value,
             started_at=datetime.now(timezone.utc),
-            model=getattr(adapter, "model_name", None),
+            model=router.current_model,
         )
         await self._tracer.record(run_id, TraceEventType.RUN_STARTED, name="run", metadata={"task": task})
         try:
             step = await self._call_model(run_id, adapter, task=task)
             await self._drive(run_id, step)
+        except BudgetExceededError as exc:
+            await self._budget_stop(run_id, exc.step)
         except Exception as exc:  # noqa: BLE001 - top-level run guard
             await self._fail_run(run_id, exc)
 
@@ -109,6 +118,8 @@ class HarnessOrchestrator:
                 tool_result = {"error": "denied", "tool": step.tool_name}
                 next_step = await self._call_model(run_id, active.adapter, tool_result=tool_result)
             await self._drive(run_id, next_step)
+        except BudgetExceededError as exc:
+            await self._budget_stop(run_id, exc.step)
         except Exception as exc:  # noqa: BLE001
             await self._fail_run(run_id, exc)
 
@@ -169,20 +180,64 @@ class HarnessOrchestrator:
         return await self._call_model(run_id, self._active[run_id].adapter, tool_result=result)
 
     async def _call_model(self, run_id: str, adapter: AgentAdapter, *, task: str | None = None, tool_result: dict | None = None) -> AgentStep:
-        model_name = getattr(adapter, "model_name", "model")
-        await self._tracer.record(run_id, TraceEventType.MODEL_CALL_STARTED, name=model_name)
-        t0 = time.monotonic()
-        if tool_result is None:
-            step = await adapter.run(task or "", {})
-        else:
-            step = await adapter.resume(run_id, tool_result)
-        latency_ms = int((time.monotonic() - t0) * 1000)
-        usage = adapter.get_usage()
-        await self._tracer.record(
-            run_id, TraceEventType.MODEL_CALL_COMPLETED, name=model_name, latency_ms=latency_ms,
-            metadata={"tokens": usage.total_tokens},
-        )
-        await self._add_tokens(run_id, usage.total_tokens)
+        active = self._active[run_id]
+        router = active.router
+
+        async def _attempt() -> tuple[AgentStep, str, int]:
+            model_name = router.current_model
+            await self._tracer.record(run_id, TraceEventType.MODEL_CALL_STARTED, name=model_name)
+            # Forced-failure demo simulation deliberately raises *after* the
+            # MODEL_CALL_STARTED trace event, matching what a real provider
+            # failure mid-call would look like.
+            router.maybe_force_failure()
+            t0 = time.monotonic()
+            if tool_result is None:
+                step = await adapter.run(task or "", {})
+            else:
+                step = await adapter.resume(run_id, tool_result)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            usage = adapter.get_usage()
+            await self._tracer.record(
+                run_id, TraceEventType.MODEL_CALL_COMPLETED, name=model_name, latency_ms=latency_ms,
+                metadata={"tokens": usage.total_tokens},
+            )
+            return step, model_name, usage.total_tokens
+
+        async def _on_retry(attempt: int, exc: Exception) -> None:
+            await self._tracer.record(
+                run_id, TraceEventType.RETRY_STARTED, name=router.current_model,
+                metadata={"attempt": attempt, "error": str(exc)},
+            )
+            await self._increment_retry_count(run_id)
+
+        try:
+            step, model_name, tokens = await with_retry(_attempt, on_retry=_on_retry)
+        except RetryExhausted as exc:
+            if router.fallback_triggered:
+                raise  # already tried the fallback and it also failed - hard fail the run
+            router.trigger_fallback()
+            await self._tracer.record(
+                run_id, TraceEventType.FALLBACK_TRIGGERED, name=router.current_model,
+                metadata={"reason": str(exc.last_error)},
+            )
+            await self._update_run(run_id, model=router.current_model)
+            step, model_name, tokens = await _attempt()
+
+        tokens_total, cost_total = await self._add_usage(run_id, model_name, tokens)
+        check = budget.check_budget(tokens_total, cost_total)
+        if check.status == BudgetStatus.EXCEEDED:
+            await self._tracer.record(
+                run_id, TraceEventType.BUDGET_EXCEEDED, status="budget_exceeded",
+                metadata={"tokens": tokens_total, "estimated_cost": cost_total},
+            )
+            await self._update_run(run_id, status=RunStatus.BUDGET_EXCEEDED.value)
+            raise BudgetExceededError(step)
+        if check.status == BudgetStatus.WARNING and not active.budget_warned:
+            active.budget_warned = True
+            await self._tracer.record(
+                run_id, TraceEventType.BUDGET_WARNING, status="warning",
+                metadata={"tokens": tokens_total, "estimated_cost": cost_total},
+            )
         return step
 
     # -- terminal states --------------------------------------------------
@@ -201,6 +256,18 @@ class HarnessOrchestrator:
         await self._update_run(run_id, status=RunStatus.FAILED.value, completed_at=now, compute_latency_at=now)
         self._active.pop(run_id, None)
 
+    async def _budget_stop(self, run_id: str, step: AgentStep | None) -> None:
+        partial = step.result_text if step is not None and step.kind == "done" else None
+        result_text = "[BUDGET_EXCEEDED] Run stopped: exceeded configured token/cost budget (Estimated Cost)."
+        if partial:
+            result_text += f" Partial result: {partial}"
+        now = datetime.now(timezone.utc)
+        await self._update_run(
+            run_id, status=RunStatus.BUDGET_EXCEEDED.value, completed_at=now, result=result_text,
+            compute_latency_at=now,
+        )
+        self._active.pop(run_id, None)
+
     # -- Run row helpers ----------------------------------------------------
 
     async def _update_run(self, run_id: str, *, compute_latency_at: datetime | None = None, **fields) -> None:
@@ -214,16 +281,26 @@ class HarnessOrchestrator:
                 run.latency_ms = int((_aware(compute_latency_at) - _aware(run.started_at)).total_seconds() * 1000)
             await session.commit()
 
-    async def _add_tokens(self, run_id: str, tokens: int) -> None:
+    async def _add_usage(self, run_id: str, model_name: str, tokens: int) -> tuple[int, float]:
         async with self._session_factory() as session:
             run = await session.get(Run, run_id)
-            if run is not None:
-                run.tokens = (run.tokens or 0) + tokens
-                await session.commit()
+            if run is None:
+                return 0, 0.0
+            run.tokens = (run.tokens or 0) + tokens
+            run.estimated_cost = (run.estimated_cost or 0.0) + budget.estimate_cost(model_name, tokens)
+            await session.commit()
+            return run.tokens, run.estimated_cost
 
     async def _increment_tool_calls(self, run_id: str) -> None:
         async with self._session_factory() as session:
             run = await session.get(Run, run_id)
             if run is not None:
                 run.tool_calls = (run.tool_calls or 0) + 1
+                await session.commit()
+
+    async def _increment_retry_count(self, run_id: str) -> None:
+        async with self._session_factory() as session:
+            run = await session.get(Run, run_id)
+            if run is not None:
+                run.retry_count = (run.retry_count or 0) + 1
                 await session.commit()

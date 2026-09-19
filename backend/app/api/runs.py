@@ -6,19 +6,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
+from app.harness.evaluator import evaluate_run
 from app.harness.provider import harness_provider
 from app.harness.tracing import serialize_trace_event
 from app.models.db import get_session
 from app.models.run import Run, RunStatus
 from app.models.trace_event import TraceEvent, TraceEventType
 from app.schemas.approval import ApprovalDecisionIn
+from app.schemas.evaluation import EvaluationResultOut
 from app.schemas.run import RunCreate, RunCreateResponse, RunDetail, RunListItem
 from app.schemas.trace_event import TraceEventOut
 from app.services.events import event_bus
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
-_TERMINAL_TRACE_TYPES = {TraceEventType.RUN_COMPLETED.value, TraceEventType.RUN_FAILED.value}
+_TERMINAL_TRACE_TYPES = {
+    TraceEventType.RUN_COMPLETED.value,
+    TraceEventType.RUN_FAILED.value,
+    TraceEventType.BUDGET_EXCEEDED.value,
+}
 
 
 def _run_to_detail(run: Run) -> RunDetail:
@@ -46,7 +52,7 @@ async def create_run(payload: RunCreate, session: AsyncSession = Depends(get_ses
     await session.refresh(run)
 
     # Kick off execution without blocking the response - see harness/orchestrator.py.
-    asyncio.create_task(harness_provider.start_run(run.id, run.task))
+    asyncio.create_task(harness_provider.start_run(run.id, run.task, payload.force_model_failure))
 
     return RunCreateResponse(id=run.id, status=run.status)
 
@@ -118,3 +124,16 @@ async def resolve_approval(
 
     run = await session.get(Run, run_id)
     return {"approval_id": approval_id, "decision": payload.decision, "run_status": run.status if run else None}
+
+
+@router.post("/{run_id}/evaluate", response_model=EvaluationResultOut)
+async def evaluate(run_id: str) -> EvaluationResultOut:
+    """Deterministic evaluation against the run's persisted trace + final
+    state (see harness/evaluator.py) - not an LLM judge. Idempotent: calling
+    this again re-evaluates and overwrites the previous result.
+    """
+    try:
+        result = await evaluate_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return EvaluationResultOut(**result)
