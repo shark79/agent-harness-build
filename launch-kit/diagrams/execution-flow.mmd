@@ -1,0 +1,74 @@
+graph TD
+    A["POST /api/runs<br/>{task, force_model_failure}"] -->|create Run row| B["Run Status: CREATED"]
+
+    B -->|start_run| C["HarnessOrchestrator.start_run"]
+    C -->|record| D["TraceEvent: RUN_STARTED"]
+    C -->|call| E["Agent.run<br/>(task)"]
+
+    E -->|return| F["AgentStep<br/>tool_call or done"]
+
+    F -->|kind == done?| G{Done?}
+    G -->|Yes| H["TraceEvent: RUN_COMPLETED"]
+    H -->|update| I["Run Status: COMPLETED"]
+    I -->|emit| J["Evaluation<br/>6 Criteria"]
+    J -->|return| K["Response to Browser"]
+
+    G -->|No| L["TraceEvent: TOOL_REQUESTED"]
+    L -->|check| M["PermissionEngine.check<br/>(tool_name)"]
+
+    M -->|DENY| N["TraceEvent: PERMISSION_CHECK<br/>status=DENY"]
+    N -->|tell agent| O["Agent.resume<br/>error: denied"]
+    O -->|return| F
+
+    M -->|ALLOW| P["TraceEvent: PERMISSION_CHECK<br/>status=ALLOW"]
+    P -->|execute| Q["ToolRegistry.execute<br/>(tool_name, args)"]
+
+    M -->|REQUIRE_APPROVAL| R["Create Approval row"]
+    R -->|record| S["TraceEvent: APPROVAL_REQUIRED"]
+    S -->|update| T["Run Status:<br/>WAITING_FOR_APPROVAL"]
+    T -->|pause| U["UI Approval Modal<br/>User Decision"]
+
+    U -->|POST /approvals/{id}<br/>{decision}| V{Approved?}
+    V -->|approve| W["TraceEvent: APPROVAL_GRANTED"]
+    W -->|continue| P
+    V -->|deny| X["TraceEvent: APPROVAL_DENIED"]
+    X -->|tell agent| O
+
+    Q -->|latency_start| Y["TraceEvent: TOOL_STARTED"]
+    Y -->|execute| Z["Call Tool Function"]
+
+    Z -->|success| AA["TraceEvent: TOOL_COMPLETED<br/>status=success"]
+    Z -->|error| AB["TraceEvent: TOOL_FAILED<br/>status=error"]
+
+    AA -->|result| AC["Agent.resume<br/>(tool_result)"]
+    AB -->|error| AC
+
+    AC -->|return| F
+
+    F -.->|every call| AD["_call_model"]
+    AD -->|wrap in| AE["with_retry<br/>MAX_ATTEMPTS"]
+    AE -->|retry on| AF["RetryableModelError"]
+    AF -->|record| AG["TraceEvent: RETRY_STARTED"]
+    AG -->|sleep & retry| AE
+
+    AE -->|if exhausted| AH["RetryExhausted"]
+    AH -->|if not fallback| AI["ModelRouter.trigger_fallback"]
+    AI -->|record| AJ["TraceEvent: FALLBACK_TRIGGERED"]
+    AJ -->|update| AK["Run.model = fallback_model"]
+    AK -->|try once more| AE
+
+    AE -->|after call| AL["_add_usage<br/>increment tokens/cost"]
+    AL -->|check| AM["check_budget"]
+    AM -->|if warning| AN["TraceEvent: BUDGET_WARNING"]
+    AM -->|if exceeded| AO["TraceEvent: BUDGET_EXCEEDED"]
+    AO -->|raise| AP["BudgetExceededError"]
+    AP -->|update| AQ["Run Status: BUDGET_EXCEEDED"]
+    AQ -->|stop| AR["Return Response"]
+
+    style B fill:#e1f5fe
+    style I fill:#c8e6c9
+    style T fill:#fff9c4
+    style U fill:#ffe0b2
+    style AQ fill:#ffccbc
+    style AG fill:#f8bbd0
+    style AJ fill:#e1bee7
