@@ -61,10 +61,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./local.db"
     backend_cors_origins: str = ""
 
-    # Optional; defaults to the fully-functional local provider. Not
-    # over-built per the brief - "trueforge" just selects the NotImplemented
-    # stub extension point (see app/harness/provider.py).
     harness_provider: str = "local"
+    trueforge_base_url: str = "http://localhost:8790"
+    trueforge_public_url: str = "http://localhost:8790"
+    trueforge_agent_name: str = "research-delivery"
+    trueforge_token: str = ""
 
     model_config = SettingsConfigDict(
         env_file=str(_ROOT_ENV), env_file_encoding="utf-8", extra="ignore"

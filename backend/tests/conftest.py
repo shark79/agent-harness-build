@@ -12,6 +12,7 @@ from pathlib import Path
 
 _TEST_DB = Path(__file__).resolve().parent / ".test.db"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB}"
+os.environ["HARNESS_PROVIDER"] = "local"  # tests must never call a configured live runtime
 os.environ.setdefault("DEMO_MODE", "true")
 os.environ.setdefault("OPENAI_API_KEY", "")
 

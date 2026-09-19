@@ -8,6 +8,8 @@ from starlette.responses import StreamingResponse
 
 from app.harness.evaluator import evaluate_run
 from app.harness.provider import harness_provider
+from app.config import settings
+from app.models.trueforge import TrueForgeRun
 from app.harness.tracing import serialize_trace_event
 from app.models.db import get_session
 from app.models.run import Run, RunStatus
@@ -46,6 +48,8 @@ def _run_to_detail(run: Run) -> RunDetail:
 
 @router.post("", response_model=RunCreateResponse, status_code=201)
 async def create_run(payload: RunCreate, session: AsyncSession = Depends(get_session)) -> RunCreateResponse:
+    if settings.harness_provider == "trueforge" and payload.force_model_failure:
+        raise HTTPException(422, "Failure simulation is only available in local demo mode")
     run = Run(task=payload.task, status=RunStatus.CREATED.value)
     session.add(run)
     await session.commit()
@@ -70,7 +74,24 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_session)) -> 
     run = await session.get(Run, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    return _run_to_detail(run)
+    link = await session.get(TrueForgeRun, run_id)
+    error = None
+    if link and hasattr(harness_provider, "sync"):
+        try:
+            await harness_provider.sync(run_id)
+            await session.refresh(run)
+            await session.refresh(link)
+        except Exception:
+            error = "Could not refresh TrueForge. Showing the last saved state; check server availability and authentication."
+    detail = _run_to_detail(run)
+    if link:
+        detail.provider = "trueforge"
+        detail.trueforge_session_id = link.session_id
+        detail.pending_approvals = [p for p in link.pending if not p.get("decision")]
+        detail.estimated_cost = None
+        detail.retry_count = None
+        detail.sync_error = error
+    return detail
 
 
 @router.get("/{run_id}/trace", response_model=list[TraceEventOut])
@@ -121,17 +142,21 @@ async def resolve_approval(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="TrueForge approval submission interrupted; inspect the session before retrying.") from exc
 
     run = await session.get(Run, run_id)
     return {"approval_id": approval_id, "decision": payload.decision, "run_status": run.status if run else None}
 
 
 @router.post("/{run_id}/evaluate", response_model=EvaluationResultOut)
-async def evaluate(run_id: str) -> EvaluationResultOut:
+async def evaluate(run_id: str, session: AsyncSession = Depends(get_session)) -> EvaluationResultOut:
     """Deterministic evaluation against the run's persisted trace + final
     state (see harness/evaluator.py) - not an LLM judge. Idempotent: calling
     this again re-evaluates and overwrites the previous result.
     """
+    if await session.get(TrueForgeRun, run_id):
+        raise HTTPException(409, "Offline heuristic evaluation does not validate TrueForge runs; inspect native tool events and actual output.")
     try:
         result = await evaluate_run(run_id)
     except KeyError as exc:

@@ -9,6 +9,7 @@ openai
 pytest
 pytest-asyncio
 httpx
+trueforge-sdk==0.2.0
 python-dotenv
 
 # aiosqlite: NOT in the original brief's package list. Added because this sandbox

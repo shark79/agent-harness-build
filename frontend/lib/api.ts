@@ -30,8 +30,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function createRun(task: string): Promise<RunCreateResponse> {
-  return request("/api/runs", { method: "POST", body: JSON.stringify({ task }) });
+export function createRun(task: string, forceModelFailure = false): Promise<RunCreateResponse> {
+  return request("/api/runs", { method: "POST", body: JSON.stringify({ task, force_model_failure: forceModelFailure }) });
 }
 
 export function getRun(runId: string): Promise<RunDetail> {
@@ -73,19 +73,13 @@ export async function evaluateRun(runId: string): Promise<EvaluationResult | nul
 // Finds the most recent APPROVAL_REQUIRED event that has no matching
 // APPROVAL_GRANTED/APPROVAL_DENIED after it, keyed by metadata.approval_id.
 export function findPendingApproval(trace: TraceEvent[]): TraceEvent | null {
-  let pending: TraceEvent | null = null;
+  const pending = new Map<unknown, TraceEvent>();
   for (const evt of trace) {
-    const approvalId = evt.metadata?.approval_id;
-    if (evt.type === "APPROVAL_REQUIRED" && approvalId) {
-      pending = evt;
-    } else if (
-      (evt.type === "APPROVAL_GRANTED" || evt.type === "APPROVAL_DENIED") &&
-      pending?.metadata?.approval_id === approvalId
-    ) {
-      pending = null;
-    }
+    const id = evt.metadata?.approval_id;
+    if (evt.type === "APPROVAL_REQUIRED" && id) pending.set(id, evt);
+    if (evt.type === "APPROVAL_GRANTED" || evt.type === "APPROVAL_DENIED") pending.delete(id);
   }
-  return pending;
+  return pending.values().next().value ?? null;
 }
 
 // Streams trace events for a run: prefers the SSE endpoint, falls back to
@@ -146,4 +140,8 @@ export function subscribeToTrace(
     stopped = true;
     stopPolling();
   };
+}
+
+export function getRuntime(): Promise<{ provider: string; agent_name: string | null; trueforge_url: string | null }> {
+  return request("/api/runtime");
 }

@@ -17,6 +17,10 @@ export interface RunDetail {
   tool_calls: number;
   retry_count: number | null;
   result: string | null;
+  provider?: string;
+  trueforge_session_id?: string | null;
+  pending_approvals?: { id: string; name: string; args: Record<string, unknown> }[];
+  sync_error?: string | null;
 }
 
 export interface RunListItem {
@@ -57,6 +61,7 @@ export const ACTIVE_STATUSES = new Set([
   "CREATED",
   "RUNNING",
   "WAITING_FOR_APPROVAL",
+  "WAITING_FOR_INPUT",
   "RETRYING",
 ]);
 
