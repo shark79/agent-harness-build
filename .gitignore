@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project-specific additions
+.venv/
+node_modules/
+.next/
+frontend/.env.local
+.DS_Store
+*.db
