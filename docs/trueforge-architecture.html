@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampaignForge — TrueForge Architecture</title>
+<style>
+  :root{--ink:#172033;--muted:#60708a;--line:#b9c7da;--blue:#eaf3ff;--blue-border:#4d8bd8;--mint:#eafaf5;--mint-border:#42a98e;--gold:#fff7e7;--gold-border:#d99c35;--purple:#f4efff;--purple-border:#8966d5}
+  *{box-sizing:border-box} body{margin:0;background:#fff;color:var(--ink);font:15px/1.4 Inter,system-ui,-apple-system,"Segoe UI",sans-serif} main{max-width:1180px;margin:auto;padding:36px 24px 54px}h1{text-align:center;font-size:clamp(1.7rem,3vw,2.7rem);margin:0 0 8px;letter-spacing:-.04em}header p{text-align:center;color:var(--muted);margin:0 auto 34px}.diagram{position:relative;display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:28px;align-items:center}.column{display:grid;gap:18px}.node{border:2px solid var(--line);border-radius:16px;padding:18px 20px;background:#fff;box-shadow:0 8px 22px #233c5d12}.node h2{font-size:1.05rem;margin:0 0 4px}.node p{margin:0;color:var(--muted);font-size:.9rem}.node.user{background:var(--blue);border-color:var(--blue-border)}.node.harness{background:var(--purple);border-color:var(--purple-border);padding:24px}.node.agent{background:var(--mint);border-color:var(--mint-border)}.node.connector{background:var(--gold);border-color:var(--gold-border)}.label{text-align:center;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;font-weight:700;margin-bottom:-6px}.arrow{position:relative;text-align:center;color:#6684aa;font-size:2rem;font-weight:300}.arrow span{display:block;font-size:.72rem;color:var(--muted);line-height:1.2;letter-spacing:0}.harness-inner{display:grid;gap:13px;margin-top:17px}.harness-inner div{background:#fff;border:1px solid #d4c8f5;border-radius:11px;padding:10px 12px;font-size:.88rem}.harness-inner b{display:block}.legend{display:flex;justify-content:center;gap:20px;flex-wrap:wrap;margin-top:30px;color:var(--muted);font-size:.8rem}.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}.foot{text-align:center;color:#8290a3;font-size:.78rem;margin-top:25px}@media(max-width:800px){main{padding:25px 14px}.diagram{grid-template-columns:1fr;gap:14px}.arrow{transform:rotate(90deg);height:38px}.column{gap:12px}.harness-inner{grid-template-columns:repeat(2,1fr)}}@media(max-width:470px){.harness-inner{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>CampaignForge on TrueForge</h1><p>From campaign brief to approved social post</p></header>
+<div class="diagram">
+  <div class="column">
+    <div class="label">People</div>
+    <div class="node user"><h2>Operator</h2><p>Brief · choose · review · approve</p></div>
+    <div class="arrow">↓<span>chat</span></div>
+    <div class="node user"><h2>TrueForge Chat UI</h2><p>Visible conversation and approval prompts</p></div>
+  </div>
+  <div class="column">
+    <div class="label">Harness</div>
+    <div class="node harness"><h2>TrueForge Agent Harness</h2><div class="harness-inner"><div><b>CampaignForge Agent</b>Orchestrator</div><div><b>Planner</b>Private strategy sub-agent</div><div><b>Executor</b>Private creative sub-agent</div><div><b>Sessions &amp; approvals</b>Durable state and control</div></div></div>
+  </div>
+  <div class="column">
+    <div class="label">Connectors</div>
+    <div class="node connector"><h2>CampaignForge MCP</h2><p>Planning · images · copy · validation<br><b>127.0.0.1:8788/mcp</b></p></div>
+    <div class="arrow">↓<span>MCP tools</span></div>
+    <div class="node connector"><h2>LinkedIn MCP</h2><p>OAuth · drafts · media · publishing<br><b>127.0.0.1:8810/mcp</b></p></div>
+  </div>
+</div>
+<div class="legend"><span><i style="background:var(--blue-border)"></i>Human / interface</span><span><i style="background:var(--purple-border)"></i>TrueForge harness</span><span><i style="background:var(--gold-border)"></i>MCP connector</span><span><i style="background:var(--mint-border)"></i>Agent layer</span></div>
+<div class="foot">Human approval remains between content creation and external publication.</div>
+</main>
+</body>
+</html>
