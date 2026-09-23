@@ -1,74 +1,61 @@
-# Agent Control Tower
+# CampaignForge
 
-Research a topic, prepare a sourced briefing, and request human approval before delivering it—using **TrueForge** as the agent runtime, with a Next.js dashboard for execution history and approval review.
+CampaignForge is a multi-agent campaign-production workflow designed for [TrueForge](https://trueforge.dev). It turns a guided campaign brief into approved creative concepts, OpenAI-generated static images, platform-specific social drafts, and—only with per-post human approval—live publishing through LinkedIn, Meta, and TikTok.
 
-**Start here: [TrueForge setup guide](TRUEFORGE_SETUP.md).** It covers model/MCP configuration, optional sandbox and skills, agent registration, local execution, tests, and hosted infrastructure. The setup follows documentation checked September 19, 2026 and pins TrueForge and its Python SDK to 0.2.0.
+Generated PNGs are exposed through CampaignForge's local asset endpoint and returned to the agent as Markdown, so they render inline in TrueForge instead of becoming sandbox downloads. For production, use durable object storage and an HTTPS asset URL.
 
-## Two runtime modes
+The project intentionally separates:
 
-| Mode | Purpose |
-|---|---|
-| `HARNESS_PROVIDER=trueforge` | Official TrueForge SDK integration: real named-agent sessions, remote tools, approvals, and persistent history |
-| `HARNESS_PROVIDER=local` | Offline custom-harness demo: keyword planning, fixture search, simulated email, retries, budgets, and heuristic evaluation |
+- **TrueForge skills** (`skills/`): repeatable agent procedures and review rules.
+- **CampaignForge MCP** (`src/`): media, research, validation, draft, and publishing tools.
+- **TrueForge UI**: the operator-facing agent configuration, chat, approvals, and trace view.
 
-The default settings preserve the offline demo. `make dev-trueforge-backend` explicitly selects TrueForge. The dashboard labels the active mode. A valid challenge demonstration requires configured real resources and a verified completed job; offline simulation alone does not qualify.
+## What to prioritize
 
-## Quick start
+1. Make the concept approval gate feel excellent. It prevents wasted image-generation cost and gives the demo a clear human decision.
+2. Keep all copy and static-image assets tied to one selected concept and shared campaign contract.
+3. Treat platform publishing as a separate, per-post effect—not an automatic next step.
+4. Validate every connector with test accounts before a live demo. Four networks are the project’s largest external risk.
 
-Requirements: Node.js 22.14+, Python 3.11+ (3.14 matches the backend image), npm. From this folder:
-
-```bash
-make setup
-make trueforge
-```
-
-Open http://localhost:8790. Configure a model, search and delivery MCP connectors, and a saved agent using [the setup guide](TRUEFORGE_SETUP.md). Model and connector secrets stay in TrueForge settings. Then, in separate terminals:
+## Local development
 
 ```bash
-make dev-trueforge-backend
+cp .env.example .env
+npm install
+npm run dev
 ```
+
+The MCP endpoint is `http://127.0.0.1:8788/mcp`; health is available at `/health`.
+
+Run verification with:
 
 ```bash
-make dev-frontend
-```
-
-Open http://localhost:3000. Backend health is http://localhost:8000/health. Backend API docs are http://localhost:8000/docs. Use `make trueforge-check` to inspect configured resource names and verify the job agent exists.
-
-## Architecture
-
-```text
-Next.js dashboard → FastAPI bridge → TrueForge session / turns
-                                      ├─ model provider
-                                      ├─ search MCP
-                                      ├─ approval → delivery MCP
-                                      └─ optional subagents / skills / sandbox
-```
-
-TrueForge owns execution and approval enforcement. The bridge stores remote session/turn IDs and mirrors persisted events. Selecting a run refreshes its state, including after a bridge restart. Questions, OAuth, artifact downloads, and interactive native features are handled in the TrueForge UI.
-
-The offline implementation remains in `backend/app/harness/orchestrator.py`; its architecture is documented in [ARCHITECTURE.md](ARCHITECTURE.md). Its illustrative budgets and evaluator do not apply to remote TrueForge runs.
-
-For the campaign-image workflow, run `make image-mcp-setup` and `make image-mcp`. This local MCP server wraps OpenAI's Image API and exposes platform-specific campaign generation. Keep the OpenAI key only in the server environment; configure `openai-image-generator` in TrueForge and remove Higgsfield. Details are in [tools/openai-image-mcp/README.md](tools/openai-image-mcp/README.md).
-
-## Tests
-
-```bash
-cd backend
-DEMO_MODE=true HARNESS_PROVIDER=local EMAIL_MODE=demo .venv/bin/python -m pytest -q
-cd ../frontend
+npm run check
 npm test
-npm run build
 ```
 
-The backend suite includes tests using the real TrueForge SDK against an HTTP mock: approvals, multiple pending calls, pagination, replay, reconnect, and interrupted submissions. Model calls, real delivery, and sandbox execution require a separate live acceptance run with your credentials.
+See [the TrueForge setup guide](docs/trueforge-setup.md) for connector and agent configuration.
 
-## Important limits
+## Safety model
 
-- Use one bridge worker/replica. Its approval lock is process-local.
-- The custom dashboard/API has no authentication; keep it local/private.
-- The bridge polls persisted events, rather than streaming individual model tokens.
-- Native questions and OAuth pauses must be completed in TrueForge.
-- Offline heuristic evaluation is disabled for TrueForge runs. Unknown cost/retry metrics are not fabricated.
-- Real delivery, provider credentials, and sandbox configuration are not bundled or automatically provisioned.
+`PUBLISHING_ENABLED` defaults to `false`. Even when it is enabled, the `publish_post` MCP tool is marked as destructive and must be configured as approval-required in TrueForge. The agent instructions also require a fresh user confirmation for each exact post payload. CampaignForge currently generates static images only; TikTok live publishing remains unavailable until a photo-post adapter is added.
 
-For the offline demo's manual setup, see [SETUP_AND_DEPLOYMENT.md](SETUP_AND_DEPLOYMENT.md). For the challenge demonstration, see [launch-kit/DEMO_SCRIPT.md](launch-kit/DEMO_SCRIPT.md).
+Never store API keys in skills, prompts, or campaign briefs. Configure all keys only in the MCP service environment or through TrueForge connector settings.
+
+## TrueForge demo screenshots
+
+The screenshots below show the harness behavior used by CampaignForge: a human approval pause, live agent trace, and a completed run with evaluation metrics.
+
+### Human approval gate
+
+![TrueForge approval gate](docs/screenshots/trueforge-approval-gate.png)
+
+### Live trace and tool call
+
+![TrueForge live trace](docs/screenshots/trueforge-live-trace.png)
+
+### Completed run and evaluation
+
+![TrueForge completed run](docs/screenshots/trueforge-completed-run.png)
+
+For the architecture view, open [docs/trueforge-architecture.html](docs/trueforge-architecture.html) in a browser.

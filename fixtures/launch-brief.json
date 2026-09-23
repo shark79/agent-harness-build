@@ -1,0 +1,11 @@
+{
+  "campaignName": "Northstar Focus launch",
+  "product": "Northstar Focus is a fictional distraction-blocking desktop app for small creative teams that helps protect meeting-free focus blocks.",
+  "audience": "Creative operations leads and team managers at 10–100 person agencies who struggle with fragmented workdays.",
+  "objective": "Drive qualified waitlist sign-ups for the product launch.",
+  "tone": "Practical, optimistic, focused",
+  "callToAction": "Join the launch waitlist",
+  "platforms": ["linkedin", "instagram", "facebook", "tiktok"],
+  "assetUrls": ["https://images.example.com/northstar-logo.png"],
+  "researchUrl": "https://example.com"
+}
